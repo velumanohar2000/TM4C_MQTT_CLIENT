@@ -1,5 +1,9 @@
-// TCP Library (framework only)
-// Jason Losh
+/*
+ * IoT_Project1
+ *
+ *  Created on: March 19, 2023
+ *      Author: Velu Manohar
+ */
 
 //-----------------------------------------------------------------------------
 // Hardware Target
@@ -70,6 +74,7 @@ bool isTcp(etherHeader *ether)
     return ok;
 }
 
+// getting tcp data from ether
 uint8_t *getTcpData(etherHeader *ether)
 {
     ipHeader *ip = (ipHeader *)ether->data;
@@ -78,6 +83,7 @@ uint8_t *getTcpData(etherHeader *ether)
     return tcp->data;
 }
 
+// getting sequence and acknowledgement numbers from received packet
 void getSeqACK(etherHeader *ether, socket *s)
 {
     ipHeader *ip = (ipHeader *)ether->data;
@@ -87,6 +93,7 @@ void getSeqACK(etherHeader *ether, socket *s)
     s->acknowledgementNumber = ntohl(tcp->sequenceNumber);
 }
 
+// sending tcp message on ether
 void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataSize)
 {
     uint8_t i;
@@ -107,7 +114,7 @@ void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataS
     }
     ether->frameType = htons(TYPE_IP);
 
-    // IP header
+    // Initializing IP header
     ipHeader *ip = (ipHeader *)ether->data;
     ip->rev = 0x4;  // for IPV4
     ip->size = 0x5; // often 5 (slides)
@@ -127,7 +134,6 @@ void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataS
     }
 
     // TCP header
-    uint16_t offset = 0x0000;
     tcpHeader *tcp = (tcpHeader *)((uint8_t *)ip + (ip->size * 4));
     tcp->sourcePort = htons(s.localPort);
     tcp->destPort = htons(s.remotePort);
@@ -139,10 +145,14 @@ void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataS
 
     // 32-bit sum over ip header
     calcIpChecksum(ip);
-    offset = 5 << OFS_SHIFT; //((tcpLength) / 4 << OFS_SHIFT);
 
+    // where TCP flags are located
+    uint16_t offset = 0x0000;
+    offset = 5 << OFS_SHIFT;
     offset |= FLAGS;
     tcp->offsetFields = htons(offset);
+
+    // setting sequence and acknowledgement numbers
     tcp->sequenceNumber = htonl(s.sequenceNumber);
     tcp->acknowledgementNumber = htonl(s.acknowledgementNumber);
 
@@ -151,14 +161,13 @@ void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataS
     for (i = 0; i < dataSize; i++)
         copyData[i] = data[i];
 
-    // 32-bit sum over pseudo-header
+    // 32-bit checksum over pseudo-header
     sum = 0;
     sumIpWords(ip->sourceIp, 8, &sum);
     tmp16 = ip->protocol;
     sum += (tmp16 & 0xff) << 8;
     uint16_t tcpLengthHtons = htons(tcpLength);
     sumIpWords(&tcpLengthHtons, 2, &sum);
-
     tcp->checksum = 0;
     sumIpWords(tcp, tcpLength, &sum);
     tcp->checksum = getIpChecksum(sum);
@@ -167,22 +176,18 @@ void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataS
     putEtherPacket(ether, sizeof(etherHeader) + ipHeaderLength + tcpLength);
 }
 
+// TCP state machine, that set flags and calls function depending of which state it is in
 void stateMachine(etherHeader *ether, socket *s)
 {
-    //    uint8_t recievedOffsetField = 0;
-    //    ipHeader *ip;
-    //    uint8_t ipHeaderLength;
-    //    tcpHeader *tcp;
     MQTT_FIXED *mqttFixed = (MQTT_FIXED *)getTcpData(ether);
-
     uint8_t size;
-
     FLAGS = 0x0000;
 
     switch (TCP_STATE)
     {
+    // TCP_CLOSED state: check if there is a hw address,
+    // if there is then it will try connecting mqtt broker if not it will send an arp request
     case TCP_CLOSED:
-        ACK_NOT_SENT_FLAG = 1;
         if (s->remoteHwAddress == NULL)
         {
             sendArpFlag = 1;
@@ -195,75 +200,193 @@ void stateMachine(etherHeader *ether, socket *s)
             sendTcpMessage(ether, *s, NULL, 0);
         }
         break;
+    // SYN has been sent, and will enter this state once SYN and ACK received
+    // from broker, in this state it will ACK complete 3 way handshake
     case TCP_SYN_SENT:
-        //        if (ACK_NOT_SENT_FLAG)
-        //        {
         s->acknowledgementNumber += 1;
         saveSeqAck(s);
         FLAGS = ACK;
         sendTcpMessage(ether, *s, NULL, 0);
         TCP_STATE = TCP_ESTABLISHED;
         putsUart0("\nSTATE: SYN SENT\n");
-        ACK_NOT_SENT_FLAG = 0;
-        // }
         break;
-
+    // TCP state is established once 3 way handshake complete,
+    // Will enter MQTT state machine
     case TCP_ESTABLISHED:
-        if (MQTT_STATE == MQTT_CONNECT)
+        // MQTT state machine
+        switch (MQTT_STATE)
         {
-            // getSeqACK(ether ,s);
+        // Will try to connect to mqtt broker
+        case MQTT_CONNECT:
             putsUart0("\nSTATE:\n\tMQTT: SENDING CON\n");
             TCP_STATE = TCP_ESTABLISHED;
             sendMqttConnect(ether, s);
-            MQTT_CONACK_ACK_NOT_SENT = 1;
-        }
-        else if (MQTT_STATE == MQTT_CONACK_ACK)
-        {
-            if (MQTT_CONACK_ACK_NOT_SENT)
-            {
-                putsUart0("\nSTATE:\n\tMQTT: SENDING CONACK_ACK\n");
-                size = mqttFixed->remainingLengthLSB + 2;
-                s->acknowledgementNumber += size;
-                saveSeqAck(s);
-                FLAGS = ACK;
-                MQTT_CONACK_ACK_NOT_SENT = 0;
-                sendTcpMessage(ether, *s, NULL, 0);
-            }
-        }
-        else if (MQTT_STATE == MQTT_PUBLISH)
-        {
-
+            break;
+        // publishing message
+        case MQTT_PUBLISH:
             sendMqttPub(ether, s);
-        }
-
-        else if (MQTT_STATE == MQTT_PUBACK_ACK)
-        {
-            size = mqttFixed->remainingLengthLSB + 2;
-            s->acknowledgementNumber += size;
-            saveSeqAck(s);
-            FLAGS |= ACK;
-            MQTT_STATE = MQTT_WAIT;
-            sendTcpMessage(ether, *s, NULL, 0);
-            printToUart(ether, s);
-        }
-        else if (MQTT_STATE == MQTT_SUBSCRIBE)
-        {
+            break;
+        // subscibing to topic
+        case MQTT_SUBSCRIBE:
             sendMqttSub(ether, s);
-        }
-        else if (MQTT_STATE == MQTT_SUBACK_ACK)
-        {
+            break;
+        // disocnonnecting from mqtt broker
+        case MQTT_DISCONNECT:
+            sendMqttDisconnect(ether, s);
+            break;
+        // unsubscribing from topic
+        case MQTT_UNSUBSCRIBE:
+            sendMqttUnsub(ether, s);
+            break;
+        // ACKING, a CONNACK, SUBACK, PUBACK, or UNSUBACK
+        case MQTT_PACKETACK_ACK:
             size = mqttFixed->remainingLengthLSB + 2;
             s->acknowledgementNumber += size;
             saveSeqAck(s);
             FLAGS |= ACK;
             MQTT_STATE = MQTT_WAIT;
             sendTcpMessage(ether, *s, NULL, 0);
+            if (isPUB)
+            {
+                printToUart(ether, s);
+                isPUB = false;
+            }
+            break;
+        case MQTT_WAIT:
+            break;
         }
-        else if (MQTT_STATE == MQTT_DISCONNECT)
-        {
-            sendMqttDisconnect(ether, s);
-        }
-        else if (MQTT_STATE == MQTT_KEEP_ALIVE)
+        
+        break;
+    // initializing disconnect
+    case TCP_FIN_WAIT_1:
+        s->acknowledgementNumber = currentAck;
+        s->sequenceNumber = currentSeq;
+        FLAGS |= (FIN | ACK);
+        sendTcpMessage(ether, *s, NULL, 0);
+        break;
+    // responding to disconnect
+    case TCP_FIN_WAIT_2:
+        s->acknowledgementNumber += 1;
+        FLAGS |= (FIN | ACK);
+        sendTcpMessage(ether, *s, NULL, 0);
+        break;
+    // last ack, then connection is closed
+    case TCP_LAST_ACK:
+        FLAGS |= ACK;
+        s->acknowledgementNumber += 1;
+        sendTcpMessage(ether, *s, NULL, 0);
+        TCP_STATE = TCP_CLOSE_WAIT;
+        break;
+    case TCP_CLOSE_WAIT:
+        break;
+    }
+}
+
+// Saving sequence number and acknowledgement number in global variables
+void saveSeqAck(socket *s)
+{
+    currentSeq = s->sequenceNumber;
+    currentAck = s->acknowledgementNumber;
+}
+// function for publishing message
+void sendMqttPub(etherHeader *ether, socket *s)
+{
+    uint8_t *sendPub = getTcpData(ether);
+    uint16_t totalLength = sendPublish(publishTopic, publishData, sendPub);
+    FLAGS |= (PSH | ACK);
+    s->acknowledgementNumber = currentAck;
+    s->sequenceNumber = currentSeq;
+    sendTcpMessage(ether, *s, sendPub, totalLength);
+}
+// function for connecting to mqtt
+void sendMqttConnect(etherHeader *ether, socket *s)
+{
+    uint8_t *sendCon = (uint8_t *)getTcpData(ether);
+    uint16_t totalLength = sendConnect(sendCon, "velu");
+    FLAGS = (PSH | ACK);
+    s->acknowledgementNumber = currentAck;
+    s->sequenceNumber = currentSeq;
+    sendTcpMessage(ether, *s, sendCon, totalLength);
+}
+// connection for subscribing
+void sendMqttSub(etherHeader *ether, socket *s)
+{
+    uint8_t *sendSubscribe = (uint8_t *)getTcpData(ether);
+    uint16_t packetId = random32() & 0xFFFF;
+    uint16_t totalLength = sendSub(subTopicFilter, sendSubscribe, packetId);
+    FLAGS = (PSH | ACK);
+    s->acknowledgementNumber = currentAck;
+    s->sequenceNumber = currentSeq;
+    sendTcpMessage(ether, *s, sendSubscribe, totalLength);
+}
+// connection for unsubscribing from topic
+void sendMqttUnsub(etherHeader *ether, socket *s)
+{
+    uint8_t *sendUnsub = (uint8_t *)getTcpData(ether);
+    uint16_t totalLength = sendUnsubFunc(unsubTopicFilter, sendUnsub);
+    if (totalLength != 65535)
+    {
+        FLAGS = (PSH | ACK);
+        s->acknowledgementNumber = currentAck;
+        s->sequenceNumber = currentSeq;
+        sendTcpMessage(ether, *s, sendUnsub, totalLength);
+    }
+    else
+    {
+        // if could not find topic, then send an error message
+        putsUart0("Unable to find topic name, please try again\n");
+        MQTT_STATE = MQTT_WAIT;
+    }
+}
+// function for disconnecting from mqtt
+void sendMqttDisconnect(etherHeader *ether, socket *s)
+{
+    uint8_t *sendDiscon = (uint8_t *)getTcpData(ether);
+    uint16_t totalLength = sendDisconnect(sendDiscon);
+    FLAGS = (FIN | ACK);
+    s->acknowledgementNumber = currentAck;
+    s->sequenceNumber = currentSeq;
+    TCP_STATE = TCP_FIN_WAIT_1;
+    sendTcpMessage(ether, *s, sendDiscon, totalLength);
+}
+// function for printing recieved publish message to putty,
+void printToUart(etherHeader *ether, socket *s)
+{
+    char printTopic[256];
+    char printData[256];
+    MQTT_FIXED *mqttFixed = (MQTT_FIXED *)getTcpData(ether);
+    PUBLISH_PAYLOAD *publishPayLoad = (PUBLISH_PAYLOAD *)mqttFixed->data;
+    uint16_t i, x;
+    for (i = 0; i < ntohs(publishPayLoad->lengthTopic); i++)
+    {
+        printTopic[i] = publishPayLoad->data[i];
+    }
+    printTopic[i] = '\0';
+    putsUart0("TOPIC: ");
+    putsUart0(printTopic);
+    putsUart0("\n");
+
+    uint16_t dataLength = publishPayLoad->data[i] | publishPayLoad->data[i + 1];
+    for (x = 0; x < dataLength; x++)
+    {
+        printData[x] = publishPayLoad->data[i + 2 + x];
+    }
+    printData[x] = '\0';
+    putsUart0("DATA: ");
+    putsUart0(printData);
+    putsUart0("\n");
+    return;
+}
+
+// case TCP_LAST_FIN_ACK:
+//         FLAGS |= (FIN | ACK);
+//         s->acknowledgementNumber += 1;
+//         sendTcpMessage(ether, *s, NULL, 0);
+//         TCP_STATE = 18;
+//         break;
+
+/*
+else if (MQTT_STATE == MQTT_KEEP_ALIVE)
         {
             if (mqttFixed->mqttControlType == (3 << 4))
             {
@@ -283,155 +406,73 @@ void stateMachine(etherHeader *ether, socket *s)
             saveSeqAck(s);
             sendTcpMessage(ether, *s, NULL, 0);
         }
-        else if (MQTT_STATE == MQTT_UNSUBSCRIBE) // && !MQTT_CONACK_ACK_NOT_SENT)
-        {
-            sendMqttUnsub(ether, s);
-        }
-        else if (MQTT_STATE == MQTT_UNSUBACK_ACK)
-        {
-            size = mqttFixed->remainingLengthLSB + 2;
-            s->acknowledgementNumber += size;
-            saveSeqAck(s);
-            FLAGS |= ACK;
-            MQTT_STATE = MQTT_WAIT;
-            sendTcpMessage(ether, *s, NULL, 0);
-        }
+*/
 
-        else if (MQTT_STATE == MQTT_WAIT)
-        {
-            // do nothing
-        }
-        break;
+// if (MQTT_STATE == MQTT_CONNECT)
+// {
+//     putsUart0("\nSTATE:\n\tMQTT: SENDING CON\n");
+//     TCP_STATE = TCP_ESTABLISHED;
+//     sendMqttConnect(ether, s);
+// }
+// else if (MQTT_STATE == MQTT_CONACK_ACK)
+// {
+//     putsUart0("\nSTATE:\n\tMQTT: SENDING CONACK_ACK\n");
+//     size = mqttFixed->remainingLengthLSB + 2;
+//     s->acknowledgementNumber += size;
+//     saveSeqAck(s);
+//     FLAGS = ACK;
+//     MQTT_CONACK_ACK_NOT_SENT = 0;
+//     sendTcpMessage(ether, *s, NULL, 0);
+// }
+// else if (MQTT_STATE == MQTT_PUBLISH)
+// {
 
-    case TCP_FIN_WAIT_2:
-        s->acknowledgementNumber += 1;
-        FLAGS |= ACK;
-        sendTcpMessage(ether, *s, NULL, 0);
-        TCP_STATE = 17;
-        break;
-    case TCP_CLOSE_WAIT:
-        s->acknowledgementNumber += 1;
-        FLAGS |= (FIN | ACK);
-        sendTcpMessage(ether, *s, NULL, 0);
-        TCP_STATE = TCP_LAST_ACK;
-        break;
+//     sendMqttPub(ether, s);
+// }
 
-    case TCP_LAST_FIN_ACK:
-        FLAGS |= (FIN | ACK);
-        s->acknowledgementNumber += 1;
-        sendTcpMessage(ether, *s, NULL, 0);
-        TCP_STATE = 18;
-        break;
-    case TCP_LAST_ACK:
-        FLAGS |= ACK;
-        s->acknowledgementNumber += 1;
-        sendTcpMessage(ether, *s, NULL, 0);
-        TCP_STATE = 19;
-        break;
+// else if (MQTT_STATE == MQTT_PUBACK_ACK)
+// {
+//     size = mqttFixed->remainingLengthLSB + 2;
+//     s->acknowledgementNumber += size;
+//     saveSeqAck(s);
+//     FLAGS |= ACK;
+//     MQTT_STATE = MQTT_WAIT;
+//     sendTcpMessage(ether, *s, NULL, 0);
+//     printToUart(ether, s);
+// }
+// else if (MQTT_STATE == MQTT_SUBSCRIBE)
+// {
+//     sendMqttSub(ether, s);
+// }
+// else if (MQTT_STATE == MQTT_SUBACK_ACK)
+// {
+//     size = mqttFixed->remainingLengthLSB + 2;
+//     s->acknowledgementNumber += size;
+//     saveSeqAck(s);
+//     FLAGS |= ACK;
+//     MQTT_STATE = MQTT_WAIT;
+//     sendTcpMessage(ether, *s, NULL, 0);
+// }
+// else if (MQTT_STATE == MQTT_DISCONNECT)
+// {
+//     sendMqttDisconnect(ether, s);
+// }
 
-    case TCP_FIN_WAIT_1:
+// else if (MQTT_STATE == MQTT_UNSUBSCRIBE) // && !MQTT_CONACK_ACK_NOT_SENT)
+// {
+//     sendMqttUnsub(ether, s);
+// }
+// else if (MQTT_STATE == MQTT_UNSUBACK_ACK)
+// {
+//     size = mqttFixed->remainingLengthLSB + 2;
+//     s->acknowledgementNumber += size;
+//     saveSeqAck(s);
+//     FLAGS |= ACK;
+//     MQTT_STATE = MQTT_WAIT;
+//     sendTcpMessage(ether, *s, NULL, 0);
+// }
 
-        s->acknowledgementNumber = currentAck;
-        s->sequenceNumber = currentSeq;
-        FLAGS |= (FIN | ACK);
-        sendTcpMessage(ether, *s, NULL, 0);
-        break;
-    }
-}
-
-void saveSeqAck(socket *s)
-{
-    currentSeq = s->sequenceNumber;
-    currentAck = s->acknowledgementNumber;
-}
-
-void sendMqttPub(etherHeader *ether, socket *s)
-{
-
-    uint8_t *sendPub = getTcpData(ether);
-    uint16_t totalLength = sendPublish(publishTopic, publishData, sendPub);
-    FLAGS |= (PSH | ACK);
-    s->acknowledgementNumber = currentAck;
-    s->sequenceNumber = currentSeq;
-    sendTcpMessage(ether, *s, sendPub, totalLength);
-}
-
-void sendMqttConnect(etherHeader *ether, socket *s)
-{
-    uint8_t *sendCon = (uint8_t *)getTcpData(ether);
-    uint16_t totalLength = sendConnect(sendCon, "velu");
-    FLAGS = (PSH | ACK);
-    s->acknowledgementNumber = currentAck;
-    s->sequenceNumber = currentSeq;
-    sendTcpMessage(ether, *s, sendCon, totalLength);
-}
-
-void sendMqttSub(etherHeader *ether, socket *s)
-{
-    uint8_t *sendSubscribe = (uint8_t *)getTcpData(ether);
-    uint16_t packetId = random32() & 0xFFFF;
-    uint16_t totalLength = sendSub(subTopicFilter, sendSubscribe, packetId);
-    FLAGS = (PSH | ACK);
-    s->acknowledgementNumber = currentAck;
-    s->sequenceNumber = currentSeq;
-    sendTcpMessage(ether, *s, sendSubscribe, totalLength);
-}
-
-void sendMqttUnsub(etherHeader *ether, socket *s)
-{
-    uint8_t *sendUnsub = (uint8_t *)getTcpData(ether);
-    uint16_t totalLength = sendUnsubFunc(unsubTopicFilter, sendUnsub);
-    if (totalLength != 65535)
-    {
-        FLAGS = (PSH | ACK);
-        s->acknowledgementNumber = currentAck;
-        s->sequenceNumber = currentSeq;
-        sendTcpMessage(ether, *s, sendUnsub, totalLength);
-    }
-    else 
-    {
-        putsUart0("Unable to find topic name, please try again\n");
-        MQTT_STATE = MQTT_WAIT;
-    }
-}
-
-void sendMqttDisconnect(etherHeader *ether, socket *s)
-{
-    uint8_t *sendDiscon = (uint8_t *)getTcpData(ether);
-    uint16_t totalLength = sendDisconnect(sendDiscon);
-    FLAGS = (FIN | ACK);
-    s->acknowledgementNumber = currentAck;
-    s->sequenceNumber = currentSeq;
-    TCP_STATE = TCP_FIN_WAIT_1;
-    sendTcpMessage(ether, *s, sendDiscon, totalLength);
-}
-
-void printToUart(etherHeader *ether, socket *s)
-{
-    char printTopic[256];
-    char printData[256];
-    MQTT_FIXED *mqttFixed = (MQTT_FIXED *)getTcpData(ether);
-    PUBLISH_PAYLOAD *publishPayLoad = (PUBLISH_PAYLOAD *)mqttFixed->data;
-    uint16_t i, x;
-    // strcpy(printTopic, publishPayLoad->data);
-    for (i = 0; i < ntohs(publishPayLoad->lengthTopic); i++)
-    {
-        printTopic[i] = publishPayLoad->data[i];
-    }
-    printTopic[i] = '\0';
-    putsUart0("TOPIC: ");
-    putsUart0(printTopic);
-    putsUart0("\n");
-
-    uint16_t dataLength = publishPayLoad->data[i] | publishPayLoad->data[i + 1];
-    for (x = 0; x < dataLength; x++)
-    {
-        printData[x] = publishPayLoad->data[i + 2 + x];
-    }
-    printData[x] = '\0';
-    putsUart0("DATA: ");
-    putsUart0(printData);
-    putsUart0("\n");
-
-    return;
-}
+// else if (MQTT_STATE == MQTT_WAIT)
+// {
+//     // do nothing
+// }

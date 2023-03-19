@@ -1,5 +1,9 @@
-// Ethernet Example
-// Jason Losh
+/*
+ * IoT_Project1
+ *
+ *  Created on: March 19, 2023
+ *      Author: Velu Manohar
+ */
 
 //-----------------------------------------------------------------------------
 // Hardware Target
@@ -345,24 +349,9 @@ void processShell(etherHeader *data, socket s)
                 }
             }
 
-            if (strcmp(token, "connect") == 0 || strcmp(token, "con") == 0)
-            {
-                // TCP_STATE = TCP_CLOSED;
-                if (TCP_STATE == TCP_ESTABLISHED)
-                {
-                    // sendConnectFlag = 1;
-                    MQTT_STATE = MQTT_CONNECT;
-                    stateMachine(data, &s);
-                    // sendConnectFlag = 0;
-                }
-            }
-
-            else if (strcmp(token, "arp") == 0 || (strcmp(token, "connect") == 0 || strcmp(token, "con") == 0))
+            else if (strcmp(token, "arp") == 0 || strcmp(token, "connect") == 0 || strcmp(token, "con") == 0)
             {
                 HANDSHAKE_STATE = 0;
-                //                getIpAddress(myIP);
-                //                getIpTimeServerAddress(remoteIp);
-                //                sendArpRequest(data, myIP, remoteIp);
             }
 
             else if (strcmp(token, "fin") == 0)
@@ -384,11 +373,10 @@ void processShell(etherHeader *data, socket s)
                 strcpy(publishData, token);
                 sendPubFlag = 1;
                 MQTT_STATE = MQTT_PUBLISH;
-                // sendMqttPub(data,&s);
                 stateMachine(data, &s);
                 sendPubFlag = 0;
             }
-            else if (strcmp(token, "sub") == 0) //|| strcmp(token, "subscribe") == 0)
+            else if (strcmp(token, "sub") == 0 || strcmp(token, "subscribe") == 0)
             {
 
                 token = strtok(NULL, " ");
@@ -398,9 +386,8 @@ void processShell(etherHeader *data, socket s)
                 stateMachine(data, &s);
                 sendSubFlag = 0;
             }
-            else if (strcmp(token, "unsub") == 0) //|| strcmp(token, "unsubscribe") == 0)
+            else if (strcmp(token, "unsub") == 0 || strcmp(token, "unsubscribe") == 0)
             {
-
                 token = strtok(NULL, " ");
                 strcpy(unsubTopicFilter, token);
                 MQTT_STATE = MQTT_UNSUBSCRIBE;
@@ -411,6 +398,10 @@ void processShell(etherHeader *data, socket s)
                 putsUart0("Commands:\r");
                 putsUart0("  ifconfig\r");
                 putsUart0("  reboot\r");
+                putsUart0(" connect\r");
+                putsUart0("  sub\r");
+                putsUart0("  unsub\r");
+                putsUart0(" disconnect\r");
                 putsUart0("  set ip|gw|dns|time|mqtt|sn w.x.y.z\r");
             }
         }
@@ -429,7 +420,6 @@ void fillSocket(etherHeader *ether, socket *s, uint8_t *remoteIp)
     {
         s->remoteHwAddress[i] = arp->sourceAddress[i];
     }
-
     s->remotePort = 1883;
     s->localPort = 65530;
 }
@@ -437,11 +427,6 @@ void fillSocket(etherHeader *ether, socket *s, uint8_t *remoteIp)
 //-----------------------------------------------------------------------------
 // Main
 //-----------------------------------------------------------------------------
-
-// understand:
-// isEtherDataAvailable()
-// isEtherOverflow()
-// getEtherPacket()
 
 // Max packet is calculated as:
 // Ether frame header (18) + Max MTU (1500) + CRC (4)
@@ -457,10 +442,8 @@ int main(void)
     sendPubFlag = 0;
     sendArpFlag = 1;
     HANDSHAKE_STATE = 0;
-    // TCP_STATE = TCP_CLOSED;
-    //  bool badTCP;
-    uint8_t *udpData; //, *tcpData;
-    // uint8_t badTCP = false;
+
+    uint8_t *udpData;
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader *data = (etherHeader *)buffer; // buffer is an array of bytes but we are interpreting it as ether data struct
     socket s;
@@ -489,7 +472,6 @@ int main(void)
     waitMicrosecond(100000);
     setPinValue(GREEN_LED, 0);
     waitMicrosecond(100000);
-    // need to set to 4096 on project properties
 
     // Main Loop
     // RTOS and interrupts would greatly improve this code,
@@ -499,56 +481,49 @@ int main(void)
 
     while (true)
     {
-        // badTCP = false;
-        recievedTCP = false;
-        // sendTcpMeassage = false;
-        //  Put terminal processing here
+        // Put terminal processing here
         processShell(data, s);
+
+        // first processing any received data already in ether
         if (receivedDataOnce)
         {
+            // sending Arp
             if (HANDSHAKE_STATE == 0)
             {
                 getIpAddress(myIP);
                 getIpTimeServerAddress(remoteIp);
                 sendArpRequest(data, myIP, remoteIp);
             }
+            // if established than connect
             else if (HANDSHAKE_STATE == 1 && TCP_STATE == TCP_ESTABLISHED)
             {
-
                 MQTT_STATE = MQTT_CONNECT;
                 HANDSHAKE_STATE = -1;
                 stateMachine(data, &s);
             }
         }
-
         // Packet processing
-        if (isEtherDataAvailable()) //|| sendTcpMeassage)
+        if (isEtherDataAvailable())
         {
-
             if (isEtherOverflow())
             {
-                setPinValue(RED_LED, 1);
-                waitMicrosecond(100000);
-                setPinValue(RED_LED, 0);
-                waitMicrosecond(100000);
-                setPinValue(RED_LED, 1);
-                waitMicrosecond(100000);
-                setPinValue(RED_LED, 0);
-                waitMicrosecond(100000);
-                setPinValue(RED_LED, 1);
-                waitMicrosecond(100000);
-                setPinValue(RED_LED, 0);
+                uint8_t i;
+                for (i = 0; i < 5; i++)
+                {
+                    setPinValue(RED_LED, 1);
+                    waitMicrosecond(100000);
+                    setPinValue(RED_LED, 0);
+                }
             }
 
             // Get packet
             getEtherPacket(data, MAX_PACKET_SIZE);
 
-            //             Handle ARP request, type 806
-            //             Handle ARP request
+            // Handle ARP request, type 806
+            // Handle ARP request
             if (isArpRequest(data))
             {
                 sendArpResponse(data);
-                // badTCP = true;
             }
             // make tcpSocket and process, cast as arp packet to read data
             if (isArpResponse(data))
@@ -559,8 +534,6 @@ int main(void)
                     fillSocket(data, &s, remoteIp);
                     HANDSHAKE_STATE = 1;
                     stateMachine(data, &s);
-
-                    // sendTcpMessage(data, s, NULL, 0);
                 }
             }
 
@@ -592,16 +565,16 @@ int main(void)
                     }
 
                     // Handle TCP datagram
-                    else if (isTcp(data)) //&& !badTCP)
+                    else if (isTcp(data))
                     {
                         putsUart0("\n\nIT IS TCP\n");
                         ipHeader *ip = (ipHeader *)data->data;
                         uint8_t ipHeaderLength = ip->size * 4;
                         tcpHeader *tcp = (tcpHeader *)((uint8_t *)ip + ipHeaderLength);
                         uint16_t recievedOffsetField = ntohs(tcp->offsetFields) & 0x3F;
-
                         MQTT_FIXED *mqttFixed = (MQTT_FIXED *)tcp->data;
 
+                        // checking tcp flags
                         if ((recievedOffsetField & ACK) == ACK)
                         {
                             putsUart0("ACK PRESENT\n");
@@ -621,49 +594,46 @@ int main(void)
 
                             if (TCP_STATE == TCP_FIN_WAIT_1)
                             {
-                                TCP_STATE = TCP_FIN_WAIT_2;
+                                TCP_STATE = TCP_LAST_ACK;
                                 stateMachine(data, &s);
                             }
                             else
                             {
-                                TCP_STATE = TCP_LAST_FIN_ACK;
+                                TCP_STATE = TCP_FIN_WAIT_2;
                                 stateMachine(data, &s);
                             }
                         }
-                        else if ((TCP_STATE == TCP_LAST_FIN_ACK) && (recievedOffsetField & ACK == ACK))
+                        else if ((TCP_STATE == TCP_FIN_WAIT_2) && (recievedOffsetField & ACK == ACK))
                         {
-                            TCP_STATE = 20;
-                            // stateMachine(data, &s);
+                            TCP_STATE = TCP_CLOSE_WAIT;
+                            stateMachine(data, &s);
                         }
-
-                        else if (TCP_STATE == TCP_ESTABLISHED) //&& TCP_STATE == TCP_ESTABLISHED)
+                        // if established than check mqtt control packet
+                        else if (TCP_STATE == TCP_ESTABLISHED)
                         {
-                            uint8_t state = TCP_STATE;
-                            putsUart0("PSH and ACK PRESENT\n");
-
-                            if (mqttFixed->mqttControlType == 0x20) //&& (recievedOffsetField & (ACK | PSH)) == (ACK | PSH) )
+                            if (mqttFixed->mqttControlType == MQTT_CTL_CONNACK)
                             {
                                 putsUart0("IT IS CONNACK\n");
-                                //  TCP_STATE = TCP_ESTABLISHED;
-                                MQTT_STATE = MQTT_CONACK_ACK;
+                                MQTT_STATE = MQTT_PACKETACK_ACK;
                                 stateMachine(data, &s);
                             }
-                            else if (mqttFixed->mqttControlType == 0x90) //&& (recievedOffsetField & (ACK | PSH)) == (ACK | PSH) )
+                            else if (mqttFixed->mqttControlType == MQTT_CTL_SUBACK)
                             {
                                 putsUart0("IT IS SUBACK\n");
-                                MQTT_STATE = MQTT_SUBACK_ACK;
+                                MQTT_STATE = MQTT_PACKETACK_ACK;
                                 stateMachine(data, &s);
                             }
-                            else if (mqttFixed->mqttControlType == 0x30) //&& (recievedOffsetField & (ACK | PSH)) == (ACK | PSH) )
+                            else if (mqttFixed->mqttControlType == MQTT_CTL_PUBACK)
                             {
                                 putsUart0("IT IS PUBACK\n");
-                                MQTT_STATE = MQTT_PUBACK_ACK;
+                                MQTT_STATE = MQTT_PACKETACK_ACK;
+                                isPUB = true;
                                 stateMachine(data, &s);
                             }
-                            else if (mqttFixed->mqttControlType == 0xB0) //&& (recievedOffsetField & (ACK | PSH)) == (ACK | PSH) )
+                            else if (mqttFixed->mqttControlType == MQTT_CTL_UNSUBACK)
                             {
                                 putsUart0("IT IS UNSUBACK\n");
-                                MQTT_STATE = MQTT_UNSUBACK_ACK;
+                                MQTT_STATE = MQTT_PACKETACK_ACK;
                                 stateMachine(data, &s);
                             }
                         }
@@ -674,43 +644,3 @@ int main(void)
         receivedDataOnce = true;
     }
 }
-
-//}
-
-//        else if (sendConnectFlag && TCP_STATE == 17)
-//        {
-//            TCP_STATE = TCP_ESTABLISHED;
-//            MQTT_STATE = MQTT_CONNECT;
-//            stateMachine(data, &s);
-//            sendConnectFlag = 0;
-//        }
-//        else if (sendFinFlag)
-//        {
-//            TCP_STATE = TCP_FIN_WAIT_1;
-//            stateMachine(data, &s);
-//            sendFinFlag = 0;
-//        }
-//        else if (sendPubFlag)
-//        {
-//            //TCP_STATE = TCP_ESTABLISHED;
-//            MQTT_STATE = MQTT_PUBLISH;
-//            //sendMqttPub(data,&s);
-//            stateMachine(data,&s);
-//            sendPubFlag = 0;
-//        }
-//        else if (sendSubFlag)
-//        {
-//            //TCP_STATE = TCP_ESTABLISHED;
-//            MQTT_STATE = MQTT_SUBSCRIBE;
-//            stateMachine(data,&s);
-//            sendSubFlag = 0;
-//        }
-//        else if (sendUnsubFlag)
-//        {
-//            //TCP_STATE = TCP_ESTABLISHED;
-//            MQTT_STATE = MQTT_UNSUBSCRIBE;
-//            stateMachine(data,&s);
-//            sendUnsubFlag = 0;
-//        }
-//        else
-//        {}

@@ -1,5 +1,9 @@
-// TCP Library (framework only)
-// Jason Losh
+/*
+ * IoT_Project1
+ *
+ *  Created on: March 19, 2023
+ *      Author: Velu Manohar
+ */
 
 //-----------------------------------------------------------------------------
 // Hardware Target
@@ -63,6 +67,7 @@ typedef struct _tcpHeader // 20 or more bytes
 #define MQTT_UNSUBSCRIBE 10
 #define MQTT_DISCONNECT 11
 #define MQTT_UNSUBACK_ACK 12
+#define MQTT_PACKETACK_ACK 13
 // TCP offset/flags
 #define FIN 0x0001
 #define SYN 0x0002
@@ -91,6 +96,8 @@ bool sendArpFlag;
 bool sendFinFlag;
 bool recievedTCP;
 bool sendSubFlag;
+
+bool isPUB;
 //-----------------------------------------------------------------------------
 // Subroutines
 //-----------------------------------------------------------------------------

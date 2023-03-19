@@ -1,5 +1,9 @@
-// MQTT Library (framework only)
-// Jason Losh
+/*
+ * IoT_Project1
+ *
+ *  Created on: March 19, 2023
+ *      Author: Velu Manohar
+ */
 
 //-----------------------------------------------------------------------------
 // Hardware Target
@@ -22,6 +26,21 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "tcp.h"
+
+#define MQTT_CTL_CONNACK 0x20
+#define MQTT_CTL_SUBACK 0x90
+#define MQTT_CTL_PUBACK 0x30
+#define MQTT_CTL_UNSUBACK 0xB0
+#define MQTT_CTL_CONNECT 0x10
+#define MQTT_CTL_PUBLISH 0x30
+#define MQTT_CTL_SUBSCRIBE 0x82
+#define MQTT_CTL_UNSUB 0xA2
+#define MQTT_CTL_DISCONNECT 0xE0
+
+
+
+
+
 
 int32_t packetIDArray[100];
 char filterTopics[100][80];
@@ -93,5 +112,4 @@ uint16_t sendDisconnect(uint8_t *sendDisconnect);
  
 
 
-//
 #endif
