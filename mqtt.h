@@ -110,6 +110,7 @@ uint8_t getPacketIdIndex(char *topicFilter);
 
 uint16_t sendDisconnect(uint8_t *sendDisconnect);
  
+void encodeRemainingLength(uint16_t remainingLength, uint8_t *buf, uint32_t *index);
 
 
 #endif

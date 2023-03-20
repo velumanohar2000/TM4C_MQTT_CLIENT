@@ -40,6 +40,8 @@ bool done = false;
 bool ACK_NOT_SENT_FLAG = 1;
 bool MQTT_CONACK_ACK_NOT_SENT = 1;
 bool MQTT_PUB_NOT_SENT = 1;
+bool ok;
+
 // ------------------------------------------------------------------------------
 //  Structures
 // ------------------------------------------------------------------------------
@@ -180,7 +182,7 @@ void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataS
 void stateMachine(etherHeader *ether, socket *s)
 {
     MQTT_FIXED *mqttFixed = (MQTT_FIXED *)getTcpData(ether);
-    uint8_t size;
+    uint32_t size;
     FLAGS = 0x0000;
 
     switch (TCP_STATE)
@@ -238,7 +240,7 @@ void stateMachine(etherHeader *ether, socket *s)
         case MQTT_UNSUBSCRIBE:
             sendMqttUnsub(ether, s);
             break;
-        // ACKING, a CONNACK, SUBACK, PUBACK, or UNSUBACK
+        // ACKING, a CONNACK, SUBACK, or UNSUBACK
         case MQTT_PACKETACK_ACK:
             size = mqttFixed->remainingLengthLSB + 2;
             s->acknowledgementNumber += size;
@@ -246,16 +248,25 @@ void stateMachine(etherHeader *ether, socket *s)
             FLAGS |= ACK;
             MQTT_STATE = MQTT_WAIT;
             sendTcpMessage(ether, *s, NULL, 0);
-            if (isPUB)
+            break;
+        case MQTT_PUBACK_ACK:
+            //uint32_t remainingLength;
+            ok = decodePub(ether,s);
+            if (ok)
             {
-                printToUart(ether, s);
-                isPUB = false;
+                FLAGS |= ACK;
+                sendTcpMessage(ether, *s, NULL, 0);
             }
+            else
+            {
+                putsUart0("Unable to decode\n");
+            }
+
+            MQTT_STATE = MQTT_WAIT;
             break;
         case MQTT_WAIT:
             break;
         }
-        
         break;
     // initializing disconnect
     case TCP_FIN_WAIT_1:
@@ -334,7 +345,7 @@ void sendMqttUnsub(etherHeader *ether, socket *s)
     else
     {
         // if could not find topic, then send an error message
-        putsUart0("Unable to find topic name, please try again\n");
+        putsUart0("Unable to find topic name, please try again.\n");
         MQTT_STATE = MQTT_WAIT;
     }
 }
@@ -350,129 +361,89 @@ void sendMqttDisconnect(etherHeader *ether, socket *s)
     sendTcpMessage(ether, *s, sendDiscon, totalLength);
 }
 // function for printing recieved publish message to putty,
-void printToUart(etherHeader *ether, socket *s)
+
+
+bool decodePub(etherHeader *ether, socket *s)
 {
+    uint16_t i;
+    uint16_t x;
     char printTopic[256];
     char printData[256];
-    MQTT_FIXED *mqttFixed = (MQTT_FIXED *)getTcpData(ether);
-    PUBLISH_PAYLOAD *publishPayLoad = (PUBLISH_PAYLOAD *)mqttFixed->data;
-    uint16_t i, x;
-    for (i = 0; i < ntohs(publishPayLoad->lengthTopic); i++)
+    char *decodedPubArray = (char *)getTcpData(ether);
+    
+    uint16_t multiplier = 1;
+    uint16_t value = 0;
+    char* ptr = decodedPubArray+1;
+    char encodedByte;
+    do {
+        encodedByte = *ptr++;   //
+        value += (encodedByte & 127) * multiplier;
+        multiplier *= 128;    
+        if (multiplier > 128*128*128) 
+        {
+            return 0; // remaining length too long
+        }
+    } while ((encodedByte & 128) != 0);
+
+    uint16_t currentIndex =  ptr - decodedPubArray;   // returns how many bytes that have been read
+    uint16_t bytesRead = currentIndex;
+    uint16_t topicLength = decodedPubArray[currentIndex] | decodedPubArray[currentIndex+1];
+    currentIndex += 1;
+    for (i = 0; i < topicLength+1; i++)
     {
-        printTopic[i] = publishPayLoad->data[i];
+        printTopic[i] = decodedPubArray[currentIndex++];
     }
     printTopic[i] = '\0';
     putsUart0("TOPIC: ");
     putsUart0(printTopic);
     putsUart0("\n");
 
-    uint16_t dataLength = publishPayLoad->data[i] | publishPayLoad->data[i + 1];
+    uint16_t dataLength = value - topicLength - 2; // publishPayLoad->data[i] | publishPayLoad->data[i + 1];
     for (x = 0; x < dataLength; x++)
     {
-        printData[x] = publishPayLoad->data[i + 2 + x];
+        printData[x] = decodedPubArray[currentIndex++];
     }
     printData[x] = '\0';
     putsUart0("DATA: ");
     putsUart0(printData);
     putsUart0("\n");
-    return;
+
+
+    s->acknowledgementNumber += value+bytesRead;
+    saveSeqAck(s);
+
+
+    return 1;
+
+
 }
+// void printToUart(etherHeader *ether, socket *s, uint16_t index, uint32_t remainingLength)
+// {
+    
+//     MQTT_FIXED *mqttFixed = (MQTT_FIXED *)getTcpData(ether);
+//     PUBLISH_PAYLOAD *publishPayLoad = (PUBLISH_PAYLOAD *)mqttFixed->data;
+//     uint16_t i, x;
+//     //uint16_t topicLength = 
+//     for (i = 0; i < ntohs(publishPayLoad->lengthTopic); i++)
+//     {
+//         printTopic[i] = publishPayLoad->data[index++];
+//     }
+//     printTopic[i] = '\0';
+//     putsUart0("TOPIC: ");
+//     putsUart0(printTopic);
+//     putsUart0("\n");
 
-// case TCP_LAST_FIN_ACK:
-//         FLAGS |= (FIN | ACK);
-//         s->acknowledgementNumber += 1;
-//         sendTcpMessage(ether, *s, NULL, 0);
-//         TCP_STATE = 18;
-//         break;
+//     uint16_t dataLength = mqttFixed->remainingLengthLSB - ntohs(publishPayLoad->lengthTopic) - 2; // publishPayLoad->data[i] | publishPayLoad->data[i + 1];
+//     for (x = 0; x < dataLength; x++)
+//     {
+//         printData[x] = publishPayLoad->data[i + x];
+//     }
+//     printData[x] = '\0';
+//     putsUart0("DATA: ");
+//     putsUart0(printData);
+//     putsUart0("\n");
 
-/*
-else if (MQTT_STATE == MQTT_KEEP_ALIVE)
-        {
-            if (mqttFixed->mqttControlType == (3 << 4))
-            {
-                char data[80];
-                char putsString[100];
-                uint8_t i = 0;
-                uint8_t x = 0;
-                for (i = 2; i < mqttFixed->remainingLengthLSB; i++)
-                {
-                    data[x++] = mqttFixed->data[i];
-                }
+    
 
-                snprintf(putsString, strlen(data), "%s\n", data);
-                putsUart0(putsString);
-            }
-            FLAGS |= ACK;
-            saveSeqAck(s);
-            sendTcpMessage(ether, *s, NULL, 0);
-        }
-*/
-
-// if (MQTT_STATE == MQTT_CONNECT)
-// {
-//     putsUart0("\nSTATE:\n\tMQTT: SENDING CON\n");
-//     TCP_STATE = TCP_ESTABLISHED;
-//     sendMqttConnect(ether, s);
-// }
-// else if (MQTT_STATE == MQTT_CONACK_ACK)
-// {
-//     putsUart0("\nSTATE:\n\tMQTT: SENDING CONACK_ACK\n");
-//     size = mqttFixed->remainingLengthLSB + 2;
-//     s->acknowledgementNumber += size;
-//     saveSeqAck(s);
-//     FLAGS = ACK;
-//     MQTT_CONACK_ACK_NOT_SENT = 0;
-//     sendTcpMessage(ether, *s, NULL, 0);
-// }
-// else if (MQTT_STATE == MQTT_PUBLISH)
-// {
-
-//     sendMqttPub(ether, s);
-// }
-
-// else if (MQTT_STATE == MQTT_PUBACK_ACK)
-// {
-//     size = mqttFixed->remainingLengthLSB + 2;
-//     s->acknowledgementNumber += size;
-//     saveSeqAck(s);
-//     FLAGS |= ACK;
-//     MQTT_STATE = MQTT_WAIT;
-//     sendTcpMessage(ether, *s, NULL, 0);
-//     printToUart(ether, s);
-// }
-// else if (MQTT_STATE == MQTT_SUBSCRIBE)
-// {
-//     sendMqttSub(ether, s);
-// }
-// else if (MQTT_STATE == MQTT_SUBACK_ACK)
-// {
-//     size = mqttFixed->remainingLengthLSB + 2;
-//     s->acknowledgementNumber += size;
-//     saveSeqAck(s);
-//     FLAGS |= ACK;
-//     MQTT_STATE = MQTT_WAIT;
-//     sendTcpMessage(ether, *s, NULL, 0);
-// }
-// else if (MQTT_STATE == MQTT_DISCONNECT)
-// {
-//     sendMqttDisconnect(ether, s);
-// }
-
-// else if (MQTT_STATE == MQTT_UNSUBSCRIBE) // && !MQTT_CONACK_ACK_NOT_SENT)
-// {
-//     sendMqttUnsub(ether, s);
-// }
-// else if (MQTT_STATE == MQTT_UNSUBACK_ACK)
-// {
-//     size = mqttFixed->remainingLengthLSB + 2;
-//     s->acknowledgementNumber += size;
-//     saveSeqAck(s);
-//     FLAGS |= ACK;
-//     MQTT_STATE = MQTT_WAIT;
-//     sendTcpMessage(ether, *s, NULL, 0);
-// }
-
-// else if (MQTT_STATE == MQTT_WAIT)
-// {
-//     // do nothing
+//     return;
 // }

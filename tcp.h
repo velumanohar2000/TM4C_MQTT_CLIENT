@@ -121,7 +121,7 @@ void sendMqttPub(etherHeader *ether, socket *s);
 void sendMqttSub(etherHeader *ether, socket *s);
 void sendMqttUnsub(etherHeader *ether, socket *s);
 void sendMqttDisconnect(etherHeader *ether, socket *s);
-void printToUart(etherHeader *ether, socket *s);
+bool decodePub(etherHeader *ether, socket *s);
 
 
 #endif

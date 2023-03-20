@@ -626,8 +626,8 @@ int main(void)
                             else if (mqttFixed->mqttControlType == MQTT_CTL_PUBACK)
                             {
                                 putsUart0("IT IS PUBACK\n");
-                                MQTT_STATE = MQTT_PACKETACK_ACK;
-                                isPUB = true;
+                                MQTT_STATE = MQTT_PUBACK_ACK;
+                                //isPUB = true;
                                 stateMachine(data, &s);
                             }
                             else if (mqttFixed->mqttControlType == MQTT_CTL_UNSUBACK)
