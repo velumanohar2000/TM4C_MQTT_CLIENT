@@ -364,10 +364,10 @@ void sendMqttDisconnect(etherHeader *ether, socket *s)
 {
     uint8_t *sendDiscon = (uint8_t *)getTcpData(ether);
     uint16_t totalLength = sendDisconnect(sendDiscon);
-    FLAGS = (FIN | ACK);
+    FLAGS = (PSH |  ACK);
     s->acknowledgementNumber = currentAck;
     s->sequenceNumber = currentSeq;
-    TCP_STATE = TCP_FIN_WAIT_1;
+    //TCP_STATE = TCP_FIN_WAIT_1;
     memcpy(sendMQTTData, (uint8_t*)sendDiscon, totalLength);
     sendTcpMessage(ether, *s, sendMQTTData, totalLength);
 }

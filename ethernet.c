@@ -638,7 +638,7 @@ int main(void)
                                 MQTT_STATE = MQTT_PACKETACK_ACK;
                                 stateMachine(data, &s);
                             }
-                            else if (mqttFixed->mqttControlType == MQTT_CTL_PUBACK)
+                            else if (mqttFixed->mqttControlType == MQTT_CTL_PUBACK || mqttFixed->mqttControlType == 0x31)
                             {
                                 //putsUart0("IT IS PUBACK\n");
                                 putsUart0("Received message from MQTT broker\n\n");
