@@ -374,6 +374,7 @@ void processShell(etherHeader *data, socket s)
                 sendPubFlag = 1;
                 MQTT_STATE = MQTT_PUBLISH;
                 stateMachine(data, &s);
+                putsUart0("Published message to MQTT broker Successfully\n");
                 sendPubFlag = 0;
             }
             else if (strcmp(token, "sub") == 0 || strcmp(token, "subscribe") == 0)
@@ -393,6 +394,10 @@ void processShell(etherHeader *data, socket s)
                 MQTT_STATE = MQTT_UNSUBSCRIBE;
                 stateMachine(data, &s);
             }
+            else if (strcmp(token, "status") == 0 || strcmp(token, "stat") == 0)
+            {
+                getTcpMqttStatus();
+            }
             else if (strcmp(token, "help") == 0)
             {
                 putsUart0("Commands:\r");
@@ -402,6 +407,7 @@ void processShell(etherHeader *data, socket s)
                 putsUart0("  sub\r");
                 putsUart0("  unsub\r");
                 putsUart0(" disconnect\r");
+                putsUart0(" status\r");
                 putsUart0("  set ip|gw|dns|time|mqtt|sn w.x.y.z\r");
             }
         }
@@ -447,7 +453,7 @@ int main(void)
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader *data = (etherHeader *)buffer; // buffer is an array of bytes but we are interpreting it as ether data struct
     socket s;
-
+    uint8_t arpCounter = 0;
     // Init controller
     initHw();
 
@@ -483,24 +489,31 @@ int main(void)
     {
         // Put terminal processing here
         processShell(data, s);
-
         // first processing any received data already in ether
         if (receivedDataOnce)
         {
             // sending Arp
-            if (HANDSHAKE_STATE == 0)
+            if (HANDSHAKE_STATE == 0 && arpCounter <= 15)
             {
                 getIpAddress(myIP);
                 getIpTimeServerAddress(remoteIp);
                 sendArpRequest(data, myIP, remoteIp);
+                arpCounter++;
             }
-            // if established than connect
             else if (HANDSHAKE_STATE == 1 && TCP_STATE == TCP_ESTABLISHED)
             {
+                arpCounter = 0;
                 MQTT_STATE = MQTT_CONNECT;
                 HANDSHAKE_STATE = -1;
                 stateMachine(data, &s);
             }
+            else if (arpCounter > 15)
+            {
+                arpCounter = 0;
+                HANDSHAKE_STATE = -1;
+            }
+            // if established than connect
+
         }
         // Packet processing
         if (isEtherDataAvailable())
@@ -567,7 +580,7 @@ int main(void)
                     // Handle TCP datagram
                     else if (isTcp(data))
                     {
-                        putsUart0("\n\nIT IS TCP\n");
+                        // putsUart0("\n\nIT IS TCP\n");
                         ipHeader *ip = (ipHeader *)data->data;
                         uint8_t ipHeaderLength = ip->size * 4;
                         tcpHeader *tcp = (tcpHeader *)((uint8_t *)ip + ipHeaderLength);
@@ -577,20 +590,20 @@ int main(void)
                         // checking tcp flags
                         if ((recievedOffsetField & ACK) == ACK)
                         {
-                            putsUart0("ACK PRESENT\n");
+                            // putsUart0("ACK PRESENT\n");
                             getSeqACK(data, &s);
                             saveSeqAck(&s);
                         }
                         if ((recievedOffsetField == (SYN | ACK)))
                         {
-                            putsUart0("SYN and ACK PRESENT\n");
+                            // putsUart0("SYN and ACK PRESENT\n");
 
                             TCP_STATE = TCP_SYN_SENT;
                             stateMachine(data, &s);
                         }
                         else if ((recievedOffsetField == (FIN | ACK)))
                         {
-                            putsUart0("FIN and ACK PRESENT\n");
+                            // putsUart0("FIN and ACK PRESENT\n");
 
                             if (TCP_STATE == TCP_FIN_WAIT_1)
                             {
@@ -613,26 +626,29 @@ int main(void)
                         {
                             if (mqttFixed->mqttControlType == MQTT_CTL_CONNACK)
                             {
-                                putsUart0("IT IS CONNACK\n");
+                                //putsUart0("IT IS CONNACK\n");
+                                putsUart0("Connected to MQTT broker Successfully\n");
                                 MQTT_STATE = MQTT_PACKETACK_ACK;
                                 stateMachine(data, &s);
                             }
                             else if (mqttFixed->mqttControlType == MQTT_CTL_SUBACK)
                             {
-                                putsUart0("IT IS SUBACK\n");
+                                //putsUart0("IT IS SUBACK\n");
+                                putsUart0("Subscribed to topic Successfully\n");
                                 MQTT_STATE = MQTT_PACKETACK_ACK;
                                 stateMachine(data, &s);
                             }
                             else if (mqttFixed->mqttControlType == MQTT_CTL_PUBACK)
                             {
-                                putsUart0("IT IS PUBACK\n");
+                                //putsUart0("IT IS PUBACK\n");
+                                putsUart0("Received message from MQTT broker\n\n");
                                 MQTT_STATE = MQTT_PUBACK_ACK;
-                                //isPUB = true;
                                 stateMachine(data, &s);
                             }
                             else if (mqttFixed->mqttControlType == MQTT_CTL_UNSUBACK)
                             {
-                                putsUart0("IT IS UNSUBACK\n");
+                                //putsUart0("IT IS UNSUBACK\n");
+                                putsUart0("Unsubscribed to topic Successfully\n");
                                 MQTT_STATE = MQTT_PACKETACK_ACK;
                                 stateMachine(data, &s);
                             }

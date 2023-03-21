@@ -27,6 +27,8 @@
 #include "timer.h"
 #include "mqtt.h"
 #include "uart0.h"
+#include <inttypes.h>
+
 
 // define MAX_PACKET_SIZE 1522
 
@@ -41,7 +43,7 @@ bool ACK_NOT_SENT_FLAG = 1;
 bool MQTT_CONACK_ACK_NOT_SENT = 1;
 bool MQTT_PUB_NOT_SENT = 1;
 bool ok;
-
+uint8_t sendMQTTData [1522];
 // ------------------------------------------------------------------------------
 //  Structures
 // ------------------------------------------------------------------------------
@@ -158,7 +160,7 @@ void sendTcpMessage(etherHeader *ether, socket s, uint8_t data[], uint16_t dataS
     tcp->sequenceNumber = htonl(s.sequenceNumber);
     tcp->acknowledgementNumber = htonl(s.acknowledgementNumber);
 
-    // copy data
+   //  copy data
     copyData = tcp->data;
     for (i = 0; i < dataSize; i++)
         copyData[i] = data[i];
@@ -202,45 +204,45 @@ void stateMachine(etherHeader *ether, socket *s)
             sendTcpMessage(ether, *s, NULL, 0);
         }
         break;
-    // SYN has been sent, and will enter this state once SYN and ACK received
-    // from broker, in this state it will ACK complete 3 way handshake
+        // SYN has been sent, and will enter this state once SYN and ACK received
+        // from broker, in this state it will ACK complete 3 way handshake
     case TCP_SYN_SENT:
         s->acknowledgementNumber += 1;
         saveSeqAck(s);
         FLAGS = ACK;
         sendTcpMessage(ether, *s, NULL, 0);
         TCP_STATE = TCP_ESTABLISHED;
-        putsUart0("\nSTATE: SYN SENT\n");
+        //putsUart0("\nSTATE: SYN SENT\n");
         break;
-    // TCP state is established once 3 way handshake complete,
-    // Will enter MQTT state machine
+        // TCP state is established once 3 way handshake complete,
+        // Will enter MQTT state machine
     case TCP_ESTABLISHED:
         // MQTT state machine
         switch (MQTT_STATE)
         {
         // Will try to connect to mqtt broker
         case MQTT_CONNECT:
-            putsUart0("\nSTATE:\n\tMQTT: SENDING CON\n");
+            //putsUart0("\nSTATE:\n\tMQTT: SENDING CON\n");
             TCP_STATE = TCP_ESTABLISHED;
             sendMqttConnect(ether, s);
             break;
-        // publishing message
+            // publishing message
         case MQTT_PUBLISH:
             sendMqttPub(ether, s);
             break;
-        // subscibing to topic
+            // subscibing to topic
         case MQTT_SUBSCRIBE:
             sendMqttSub(ether, s);
             break;
-        // disocnonnecting from mqtt broker
+            // disocnonnecting from mqtt broker
         case MQTT_DISCONNECT:
             sendMqttDisconnect(ether, s);
             break;
-        // unsubscribing from topic
+            // unsubscribing from topic
         case MQTT_UNSUBSCRIBE:
             sendMqttUnsub(ether, s);
             break;
-        // ACKING, a CONNACK, SUBACK, or UNSUBACK
+            // ACKING, a CONNACK, SUBACK, or UNSUBACK
         case MQTT_PACKETACK_ACK:
             size = mqttFixed->remainingLengthLSB + 2;
             s->acknowledgementNumber += size;
@@ -268,28 +270,28 @@ void stateMachine(etherHeader *ether, socket *s)
             break;
         }
         break;
-    // initializing disconnect
-    case TCP_FIN_WAIT_1:
-        s->acknowledgementNumber = currentAck;
-        s->sequenceNumber = currentSeq;
-        FLAGS |= (FIN | ACK);
-        sendTcpMessage(ether, *s, NULL, 0);
-        break;
-    // responding to disconnect
-    case TCP_FIN_WAIT_2:
-        s->acknowledgementNumber += 1;
-        FLAGS |= (FIN | ACK);
-        sendTcpMessage(ether, *s, NULL, 0);
-        break;
-    // last ack, then connection is closed
-    case TCP_LAST_ACK:
-        FLAGS |= ACK;
-        s->acknowledgementNumber += 1;
-        sendTcpMessage(ether, *s, NULL, 0);
-        TCP_STATE = TCP_CLOSE_WAIT;
-        break;
-    case TCP_CLOSE_WAIT:
-        break;
+        // initializing disconnect
+        case TCP_FIN_WAIT_1:
+            s->acknowledgementNumber = currentAck;
+            s->sequenceNumber = currentSeq;
+            FLAGS |= (FIN | ACK);
+            sendTcpMessage(ether, *s, NULL, 0);
+            break;
+            // responding to disconnect
+        case TCP_FIN_WAIT_2:
+            s->acknowledgementNumber += 1;
+            FLAGS |= (FIN | ACK);
+            sendTcpMessage(ether, *s, NULL, 0);
+            break;
+            // last ack, then connection is closed
+        case TCP_LAST_ACK:
+            FLAGS |= ACK;
+            s->acknowledgementNumber += 1;
+            sendTcpMessage(ether, *s, NULL, 0);
+            TCP_STATE = TCP_CLOSE_WAIT;
+            break;
+        case TCP_CLOSE_WAIT:
+            break;
     }
 }
 
@@ -307,7 +309,9 @@ void sendMqttPub(etherHeader *ether, socket *s)
     FLAGS |= (PSH | ACK);
     s->acknowledgementNumber = currentAck;
     s->sequenceNumber = currentSeq;
-    sendTcpMessage(ether, *s, sendPub, totalLength);
+    //sendTcpMessage(ether, *s, sendPub, totalLength);
+    memcpy(sendMQTTData, (uint8_t*)sendPub, totalLength);
+    sendTcpMessage(ether, *s, sendMQTTData, totalLength);
 }
 // function for connecting to mqtt
 void sendMqttConnect(etherHeader *ether, socket *s)
@@ -317,6 +321,8 @@ void sendMqttConnect(etherHeader *ether, socket *s)
     FLAGS = (PSH | ACK);
     s->acknowledgementNumber = currentAck;
     s->sequenceNumber = currentSeq;
+    //sendTcpMessage(ether, *s, sendCon, totalLength);
+    memcpy(sendMQTTData, (uint8_t*)sendCon, totalLength);
     sendTcpMessage(ether, *s, sendCon, totalLength);
 }
 // connection for subscribing
@@ -328,7 +334,9 @@ void sendMqttSub(etherHeader *ether, socket *s)
     FLAGS = (PSH | ACK);
     s->acknowledgementNumber = currentAck;
     s->sequenceNumber = currentSeq;
-    sendTcpMessage(ether, *s, sendSubscribe, totalLength);
+    //sendTcpMessage(ether, *s, sendSubscribe, totalLength);
+    memcpy(sendMQTTData, (uint8_t*)sendSubscribe, totalLength);
+    sendTcpMessage(ether, *s, sendMQTTData, totalLength);
 }
 // connection for unsubscribing from topic
 void sendMqttUnsub(etherHeader *ether, socket *s)
@@ -340,7 +348,9 @@ void sendMqttUnsub(etherHeader *ether, socket *s)
         FLAGS = (PSH | ACK);
         s->acknowledgementNumber = currentAck;
         s->sequenceNumber = currentSeq;
-        sendTcpMessage(ether, *s, sendUnsub, totalLength);
+        //sendTcpMessage(ether, *s, sendUnsub, totalLength);
+        memcpy(sendMQTTData, (uint8_t*)sendUnsub, totalLength);
+        sendTcpMessage(ether, *s, sendMQTTData, totalLength);
     }
     else
     {
@@ -358,7 +368,8 @@ void sendMqttDisconnect(etherHeader *ether, socket *s)
     s->acknowledgementNumber = currentAck;
     s->sequenceNumber = currentSeq;
     TCP_STATE = TCP_FIN_WAIT_1;
-    sendTcpMessage(ether, *s, sendDiscon, totalLength);
+    memcpy(sendMQTTData, (uint8_t*)sendDiscon, totalLength);
+    sendTcpMessage(ether, *s, sendMQTTData, totalLength);
 }
 // function for printing recieved publish message to putty,
 
@@ -367,10 +378,10 @@ bool decodePub(etherHeader *ether, socket *s)
 {
     uint16_t i;
     uint16_t x;
-    char printTopic[256];
-    char printData[256];
+//    char printTopic[256];
+//    char printData[2048];
     char *decodedPubArray = (char *)getTcpData(ether);
-    
+
     uint16_t multiplier = 1;
     uint16_t value = 0;
     char* ptr = decodedPubArray+1;
@@ -389,23 +400,28 @@ bool decodePub(etherHeader *ether, socket *s)
     uint16_t bytesRead = currentIndex;
     uint16_t topicLength = decodedPubArray[currentIndex] | decodedPubArray[currentIndex+1];
     currentIndex += 1;
+    putsUart0("TOPIC: ");
+    //    for (i = 0; i < topicLength+1; i++)
+    //    {
+    //        printTopic[i] = decodedPubArray[currentIndex++];
+    //    }
+    //    putsUart0(printTopic);
     for (i = 0; i < topicLength+1; i++)
     {
-        printTopic[i] = decodedPubArray[currentIndex++];
+        putcUart0(((char)decodedPubArray[currentIndex++]));
     }
-    printTopic[i] = '\0';
-    putsUart0("TOPIC: ");
-    putsUart0(printTopic);
+    //putsUart0(((char*)decodedPubArray[currentIndex++]));
+    //printTopic[i] = '\0';
+    // putsUart0(printTopic);
     putsUart0("\n");
-
+    putsUart0("DATA: ");
     uint16_t dataLength = value - topicLength - 2; // publishPayLoad->data[i] | publishPayLoad->data[i + 1];
     for (x = 0; x < dataLength; x++)
     {
-        printData[x] = decodedPubArray[currentIndex++];
+        putcUart0(((char)decodedPubArray[currentIndex++]));
     }
-    printData[x] = '\0';
-    putsUart0("DATA: ");
-    putsUart0(printData);
+    //printData[x] = '\0';
+   // putsUart0(printData);
     putsUart0("\n");
 
 
@@ -417,13 +433,98 @@ bool decodePub(etherHeader *ether, socket *s)
 
 
 }
+
+
+void getTcpMqttStatus()
+{
+    uint8_t i;
+    char str[10];
+    uint8_t ip[4];
+    putcUart0('\n');
+    getIpAddress(ip);
+    putsUart0("IP:    ");
+    for (i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        snprintf(str, sizeof(str), "%" PRIu8, ip[i]);
+        putsUart0(str);
+        if (i < IP_ADD_LENGTH - 1)
+            putcUart0('.');
+    }
+    putsUart0(" (static)");
+    putcUart0('\n');
+    getIpMqttBrokerAddress(ip);
+    putsUart0("MQTT:  ");
+    for (i = 0; i < IP_ADD_LENGTH; i++)
+    {
+        snprintf(str, sizeof(str), "%" PRIu8, ip[i]);
+        putsUart0(str);
+        if (i < IP_ADD_LENGTH - 1)
+            putcUart0('.');
+    }
+    putcUart0('\n');
+
+    bool mqttStatus = false;
+    putsUart0("TCP STATE: ");
+    switch (TCP_STATE)
+    {
+    case TCP_CLOSED:
+        putsUart0("CLOSED\n");
+        break;
+    case TCP_SYN_SENT:
+        putsUart0("SYN-SENT\n");
+        break;
+    case TCP_ESTABLISHED:
+        mqttStatus = true;
+        putsUart0("Established\n");
+        switch (MQTT_STATE)
+        {
+        case MQTT_PUBLISH:
+        case MQTT_SUBSCRIBE:
+        case MQTT_DISCONNECT:
+        case MQTT_UNSUBSCRIBE:
+        case MQTT_PACKETACK_ACK:
+        case MQTT_PUBACK_ACK:
+        case MQTT_WAIT:
+        case MQTT_CONNECT:
+            putsUart0("MQTT STATE: CONNECTED\n");
+            break;
+        default:
+            putsUart0("MQTT STATE: NOT CONNECTED\n");
+            break;
+        }
+        break;
+        case TCP_FIN_WAIT_1:
+            putsUart0("FIN WAIT 1\n");
+            break;
+        case TCP_FIN_WAIT_2:
+            putsUart0("FIN WAIT 2\n");
+            break;
+        case TCP_LAST_ACK:
+            putsUart0("LAST ACK\n");
+            break;
+        case TCP_CLOSE_WAIT:
+            putsUart0("CLOSED\n");
+            break;
+    }
+    if (!mqttStatus)
+        putsUart0("MQTT STATE: NOT CONNECTED\n");
+
+}
+
+
+
+
+
+
+
+
 // void printToUart(etherHeader *ether, socket *s, uint16_t index, uint32_t remainingLength)
 // {
-    
+
 //     MQTT_FIXED *mqttFixed = (MQTT_FIXED *)getTcpData(ether);
 //     PUBLISH_PAYLOAD *publishPayLoad = (PUBLISH_PAYLOAD *)mqttFixed->data;
 //     uint16_t i, x;
-//     //uint16_t topicLength = 
+//     //uint16_t topicLength =
 //     for (i = 0; i < ntohs(publishPayLoad->lengthTopic); i++)
 //     {
 //         printTopic[i] = publishPayLoad->data[index++];
@@ -443,7 +544,7 @@ bool decodePub(etherHeader *ether, socket *s)
 //     putsUart0(printData);
 //     putsUart0("\n");
 
-    
+
 
 //     return;
 // }

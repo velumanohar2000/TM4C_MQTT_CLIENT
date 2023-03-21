@@ -23,6 +23,8 @@ tcp.obj: ../ip.h
 tcp.obj: ../timer.h
 tcp.obj: ../mqtt.h
 tcp.obj: ../uart0.h
+tcp.obj: C:/ti/ccs1200/ccs/tools/compiler/ti-cgt-arm_20.2.6.LTS/include/inttypes.h
+tcp.obj: C:/ti/ccs1200/ccs/tools/compiler/ti-cgt-arm_20.2.6.LTS/include/machine/_inttypes.h
 
 ../tcp.c:
 
@@ -69,4 +71,8 @@ C:/ti/ccs1200/ccs/tools/compiler/ti-cgt-arm_20.2.6.LTS/include/sys/_stdint.h:
 ../mqtt.h:
 
 ../uart0.h:
+
+C:/ti/ccs1200/ccs/tools/compiler/ti-cgt-arm_20.2.6.LTS/include/inttypes.h:
+
+C:/ti/ccs1200/ccs/tools/compiler/ti-cgt-arm_20.2.6.LTS/include/machine/_inttypes.h:
 

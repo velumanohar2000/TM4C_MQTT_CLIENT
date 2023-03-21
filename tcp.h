@@ -122,6 +122,7 @@ void sendMqttSub(etherHeader *ether, socket *s);
 void sendMqttUnsub(etherHeader *ether, socket *s);
 void sendMqttDisconnect(etherHeader *ether, socket *s);
 bool decodePub(etherHeader *ether, socket *s);
+void getTcpMqttStatus();
 
 
 #endif
